@@ -4,116 +4,117 @@ import cv2
 import numpy as np
 import time
 
-# CONFIGURACIÓN STUN ULTRA COMPATIBLE
-# Estos servidores ayudan a que la cámara del celular conecte a través de datos móviles (4G/5G)
+# Configuración de servidores STUN de Google y Mozilla (Estándar global)
 RTC_CONFIGURATION = RTCConfiguration(
-    {"iceServers": [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun.services.mozilla.com"]}
-    ]}
+    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}, {"urls": ["stun:stun.services.mozilla.com"]}]}
 )
 
-st.set_page_config(page_title="Jaime Roldos Aguilera - Duel", layout="centered")
+st.set_page_config(page_title="Roldós Duel", layout="centered")
 
-# --- CSS MEJORADO ---
+# --- ESTILO VISUAL ---
 st.markdown("""
     <style>
-    .title-container {
-        text-align: center;
-        background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-family: 'Arial Black';
-        font-size: 35px;
-    }
-    .vs-container { text-align: center; color: white; font-weight: bold; }
+    .main { background-color: #0e1117; }
+    .stButton>button { width: 100%; border-radius: 20px; height: 3em; background-color: #00ffcc; color: black; font-weight: bold; }
+    .title-text { text-align: center; color: #00ffcc; font-family: 'Courier New'; font-size: 30px; text-shadow: 2px 2px #000; }
     </style>
     """, unsafe_allow_html=True)
 
-st.markdown("<h1 class='title-container'>JAIME ROLDOS AGUILERA</h1>", unsafe_allow_html=True)
-st.markdown("<div class='vs-container'>⚔️ ONICHAN 1 vs ONICHAN 2 ⚔️</div>", unsafe_allow_html=True)
+st.markdown("<h1 class='title-text'>JAIME ROLDÓS AGUILERA</h1>", unsafe_allow_html=True)
+st.write("---")
 
+# --- LÓGICA DE ESTADO ---
 if 'puntos_izq' not in st.session_state: st.session_state.puntos_izq = 0
 if 'puntos_der' not in st.session_state: st.session_state.puntos_der = 0
-if 'inicio_juego' not in st.session_state: st.session_state.inicio_juego = None
+if 'estado' not in st.session_state: st.session_state.estado = "ESPERA" # ESPERA, CUENTA, JUEGO
+if 'timer' not in st.session_state: st.session_state.timer = 0
 
-c1, c2 = st.columns(2)
-with c1:
-    if st.button('🚀 INICIAR CONTEO'):
-        st.session_state.puntos_izq = 0
-        st.session_state.puntos_der = 0
-        st.session_state.inicio_juego = time.time()
-with c2:
-    if st.button('🔄 REINICIAR'):
-        st.session_state.puntos_izq = 0
-        st.session_state.puntos_der = 0
-        st.session_state.inicio_juego = None
-        st.rerun()
+def iniciar_duelo():
+    st.session_state.puntos_izq = 0
+    st.session_state.puntos_der = 0
+    st.session_state.estado = "CUENTA"
+    st.session_state.timer = time.time()
 
-class PrecisionDuelTransformer(VideoTransformerBase):
+def reiniciar():
+    st.session_state.estado = "ESPERA"
+    st.session_state.puntos_izq = 0
+    st.session_state.puntos_der = 0
+    st.rerun()
+
+# --- BOTONES ---
+if st.session_state.estado == "ESPERA":
+    st.button("🎮 COMENZAR DESAFÍO", on_click=iniciar_duelo)
+else:
+    st.button("🔄 REINICIAR", on_click=reiniciar)
+
+class DuelTransformer(VideoTransformerBase):
     def __init__(self):
-        self.fgbg = cv2.createBackgroundSubtractorMOG2(history=10, varThreshold=50)
+        self.fgbg = cv2.createBackgroundSubtractorMOG2(history=10, varThreshold=40)
 
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1)
         h, w, _ = img.shape
         mitad = w // 2
-        ahora = time.time()
-
-        juego_activo = False
-        if st.session_state.inicio_juego is not None:
-            t_pasado = ahora - st.session_state.inicio_juego
-            if t_pasado < 4:
-                contador = 3 - int(t_pasado)
-                cv2.rectangle(img, (0, 0), (w, h), (0, 0, 0), -1)
-                if contador > 0:
-                    cv2.putText(img, f"EMPIEZA EN: {contador}", (w//6, h//2), cv2.FONT_HERSHEY_DUPLEX, 1.2, (255, 255, 255), 2)
-                else:
-                    cv2.putText(img, "¡YA!", (w//2-50, h//2), cv2.FONT_HERSHEY_TRIPLEX, 3, (0, 255, 0), 5)
-                return img
+        
+        # 1. CUENTA REGRESIVA SOBRE EL VIDEO
+        if st.session_state.estado == "CUENTA":
+            transcurrido = time.time() - st.session_state.timer
+            cv2.rectangle(img, (0,0), (w,h), (0,0,0), -1)
+            
+            if transcurrido < 3:
+                num = 3 - int(transcurrido)
+                cv2.putText(img, str(num), (w//2-50, h//2+50), cv2.FONT_HERSHEY_TRIPLEX, 6, (0, 255, 255), 15)
             else:
-                juego_activo = True
+                st.session_state.estado = "JUEGO"
+            return img
 
-        fgmask = self.fgbg.apply(img)
-        if juego_activo and st.session_state.puntos_izq < 300 and st.session_state.puntos_der < 300:
+        # 2. PROCESAMIENTO DE DUELO (SOLO EN ESTADO JUEGO)
+        if st.session_state.estado == "JUEGO":
+            fgmask = self.fgbg.apply(img)
             _, fgmask = cv2.threshold(fgmask, 200, 255, cv2.THRESH_BINARY)
-            m_izq = cv2.countNonZero(fgmask[:, :mitad])
-            m_der = cv2.countNonZero(fgmask[:, mitad:])
-            if m_izq > 4000: st.session_state.puntos_izq += 2
-            if m_der > 4000: st.session_state.puntos_der += 2
+            
+            # Solo sumamos si no hay ganador
+            if st.session_state.puntos_izq < 300 and st.session_state.puntos_der < 300:
+                m_izq = cv2.countNonZero(fgmask[:, :mitad])
+                m_der = cv2.countNonZero(fgmask[:, mitad:])
+                
+                if m_izq > 5000: st.session_state.puntos_izq += 3
+                if m_der > 5000: st.session_state.puntos_der += 3
 
-        # Dibujo de interfaz
-        cv2.rectangle(img, (0,0), (w, 40), (20,20,20), -1)
-        cv2.putText(img, "O1", (20, 30), cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 150, 255), 2)
-        cv2.putText(img, "O2", (mitad + 20, 30), cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 255, 150), 2)
-        cv2.line(img, (mitad, 40), (mitad, h), (200, 200, 200), 1)
+        # --- DIBUJAR INTERFAZ ---
+        # Nombres
+        cv2.putText(img, "ONICHAN 1", (30, 40), 1, 1.5, (0, 0, 255), 2)
+        cv2.putText(img, "ONICHAN 2", (mitad + 30, 40), 1, 1.5, (255, 0, 0), 2)
+        cv2.line(img, (mitad, 0), (mitad, h), (255,255,255), 2)
 
-        # Barras
-        cv2.rectangle(img, (10, h-25), (10+min(st.session_state.puntos_izq, mitad-20), h-10), (0, 0, 255), -1)
-        cv2.rectangle(img, (mitad+10, h-25), (mitad+10+min(st.session_state.puntos_der, mitad-20), h-10), (255, 0, 0), -1)
+        # Barras de Energía
+        p_izq = min(st.session_state.puntos_izq, 300)
+        p_der = min(st.session_state.puntos_der, 300)
+        cv2.rectangle(img, (20, h-30), (20+p_izq, h-10), (0, 0, 255), -1)
+        cv2.rectangle(img, (mitad+20, h-30), (mitad+20+p_der, h-10), (255, 0, 0), -1)
 
+        # Ganador
         if st.session_state.puntos_izq >= 300:
-            cv2.putText(img, "GANO 1", (10, h//2), cv2.FONT_HERSHEY_TRIPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(img, "GANADOR 1", (50, h//2), cv2.FONT_HERSHEY_TRIPLEX, 1.5, (0, 255, 0), 3)
         elif st.session_state.puntos_der >= 300:
-            cv2.putText(img, "GANO 2", (mitad+10, h//2), cv2.FONT_HERSHEY_TRIPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(img, "GANADOR 2", (mitad+50, h//2), cv2.FONT_HERSHEY_TRIPLEX, 1.5, (0, 255, 0), 3)
 
         return img
 
-# LANZADOR OPTIMIZADO PARA CELULARES
-webrtc_streamer(
-    key="juego-vfinal",
-    video_transformer_factory=PrecisionDuelTransformer,
+# --- LANZADOR WEB ---
+ctx = webrtc_streamer(
+    key="duelo-final-roldos",
+    video_transformer_factory=DuelTransformer,
     rtc_configuration=RTC_CONFIGURATION,
-    # Estos constraints ayudan a que el celular no se bloquee por pedir mucha calidad
     media_stream_constraints={
-        "video": {
-            "width": {"ideal": 480}, 
-            "frameRate": {"ideal": 15},
-            "facingMode": "user" # Fuerza la cámara frontal
-        },
+        "video": {"width": {"ideal": 480}, "frameRate": {"ideal": 15}},
         "audio": False
     },
     async_processing=True,
 )
+
+if ctx.state.playing:
+    st.info("Cámara activa. ¡Presiona el botón verde para iniciar el conteo!")
+else:
+    st.warning("Haz clic en 'START' arriba para encender la cámara primero.")
